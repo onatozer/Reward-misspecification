@@ -1,32 +1,13 @@
 import sys
 sys.path.append("./safe-grid-gym")
-# import gymnasium as gym
 import gym
 import safe_grid_gym  # registers envs with old gym registry
-from stable_baselines3 import PPO, DQN, A2C
 import numpy as np
-from config import PPO_KWARGS
-
-# from ai_safety_gridworlds.helpers import factory
-# from ai_safety_gridworlds.environments.shared.safety_game import Actions
-
-ENVIRONMENT_SETTINGS = [
-    "DistributionalShift-v0",
-    "BoatRace-v0", # Reward-hacking
-    "TomatoWatering-v0", # Reward-hacking
-    "AbsentSupervisor-v0", 
-    "IslandNavigation-v0", # Safe exploration
-    "SideEffectsSokoban-v0",
-]
-
-str_to_alg = {
-    "PPO": PPO,
-}
-
+import config
+from config import *
 from collections import deque
-
 import numpy as np
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback, ProgressBarCallback
 
 
 class TrainingPerformanceCallback(BaseCallback):
@@ -53,9 +34,8 @@ class TrainingPerformanceCallback(BaseCallback):
         self,
         log_freq: int = 1_000,
         window_size: int = 100,
-        verbose: int = 0,
     ):
-        super().__init__(verbose)
+        super().__init__()
 
         self.log_freq = log_freq
         self.window_size = window_size
@@ -145,28 +125,32 @@ class TrainingPerformanceCallback(BaseCallback):
             std_reward,
         )
 
-        if self.verbose:
-            print(
-                f"Timesteps: {self.num_timesteps:,} | "
-                f"Mean reward: {mean_reward:.3f} | "
-                f"Std: {std_reward:.3f}"
-            )
 
 
-def train_eval_loop(env_str: str = ENVIRONMENT_SETTINGS[0], algorithm: str = "PPO"):
+def train_eval_loop(env_str: str = ENVIRONMENT_SETTINGS[0], algorithm_str: str = "PPO"):
+    # Dynamically initialize the algorithm based off of which algorithm string and environment setting was passed in
     env = gym.make(env_str)
-    kwarg_dict = PPO_KWARGS
-    kwarg_dict["env"] = env
-    model = PPO(**kwarg_dict)
 
-    #TODO: Optionality for changing the RL alg
+    kwarg_dict = getattr(config, f"{algorithm_str}_KWARGS")
+    kwarg_dict["env"] = env
+
+    algorithm = str_to_alg[algorithm_str]
+    model = algorithm(**kwarg_dict)
      
     num_steps = 500_000
-    model_str = f"model_weights/{algorithm}_{env_str}_{num_steps}"
+    model_str = f"{algorithm_str}_{env_str}_{num_steps}"
+
+    callbacks = CallbackList([
+        EntropyAnnealingCallback(initial=0.05, final=0.01, anneal_steps=500_000),
+        CheckpointCallback(save_freq=100_000, save_path="model_weights", name_prefix = model_str),
+        TrainingPerformanceCallback(log_freq=1_000, window_size=1_000)
+        ]
+    )
+
 
     # model.load(model_str)
-    model.learn(total_timesteps=num_steps, progress_bar=True)
-    model.save(model_str)
+    model.learn(total_timesteps=num_steps, progress_bar=True, callback=callbacks)
+    # model.save(os.pathmodel_str)
 
     # Evaluate
     obs = env.reset()
