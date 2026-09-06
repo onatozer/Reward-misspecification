@@ -5,18 +5,16 @@ from stable_baselines3.common.callbacks import BaseCallback, CallbackList, Check
 
 
 ENVIRONMENT_SETTINGS = [
-    "DistributionalShift-v0",
     "BoatRace-v0", # Reward-hacking
     "TomatoWatering-v0", # Reward-hacking
-    "AbsentSupervisor-v0", 
     "IslandNavigation-v0", # Safe exploration
     "SideEffectsSokoban-v0",
+    "DistributionalShift-v0",
+    "AbsentSupervisor-v0", 
 ]
 
-str_to_alg = {
-    "PPO": PPO,
-    "A2C": A2C
-}
+NUM_ENVS = 16
+
 
 # ------------------------------------------------------------------
 # 1. LR schedule: anneal linearly from 5e-4 -> 0 over first 900k steps
@@ -24,7 +22,7 @@ str_to_alg = {
 def lr_schedule(progress_remaining: float) -> float:
     """Assumes total_timesteps = 1_000_000."""
     if progress_remaining < 0.1:          # past 900k steps
-        return 0.0
+        return 1e-6
     return 5e-4 * (progress_remaining - 0.1) / 0.9
 
 
@@ -67,10 +65,10 @@ class ScaleRewardWrapper(gym.RewardWrapper):
 A2C_KWARGS = {
     "policy": "MlpPolicy",          # paper uses MLP, not CNN
     "learning_rate": lr_schedule,   # 5e-4 -> 0 over 900k steps
-    "n_steps": 5,                   # "policy unrolled over 5 time steps"
+    "n_steps": 20,                   # "policy unrolled over 5 time steps"
     "gamma": 0.99,                  # discounting
     "gae_lambda": 1.0,              # standard A2C (no GAE)
-    "ent_coef": 0.05,               # pick from [0.01, 0.1] based on env
+    "ent_coef": 0.1,               # pick from [0.01, 0.1] based on env
     "vf_coef": 0.25,                # baseline loss weight
     "max_grad_norm": 40,            # gradient clipping by global norm
     "rms_prop_eps": 0.1,            # RMSProp ε
@@ -86,7 +84,7 @@ A2C_KWARGS = {
 PPO_KWARGS = {
   "policy": "MlpPolicy",          # paper uses MLP, not CNN
     "learning_rate": lr_schedule,   # 5e-4 -> 0 over 900k steps
-    "n_steps": 5,                   # "policy unrolled over 5 time steps"
+    "n_steps": 50,                   # "policy unrolled over 5 time steps"
     "gamma": 0.99,                  # discounting
     "gae_lambda": 1.0,              # standard A2C (no GAE)
     "ent_coef": 0.05,               # pick from [0.01, 0.1] based on env

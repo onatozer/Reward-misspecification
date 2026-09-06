@@ -2,134 +2,98 @@ import sys
 sys.path.append("./safe-grid-gym")
 import gym
 import safe_grid_gym  # registers envs with old gym registry
+import pandas as pd
 import numpy as np
-import config
-from config import *
-from collections import deque
-import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import argparse
+
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback, ProgressBarCallback
 
+import config
+from config import *
+from lad import LAD
+
+
+def create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run a specific algorithm.")
+
+    # Add the algorithm string argument
+    parser.add_argument(
+        "-a", "--algorithm_str",
+        type=str,
+        default="A2C",
+        help="Name of the RL algorithm to run (ex 'PPO', 'A2C')"
+    )
+    
+    parser.add_argument(
+        "-n", "--num_steps",
+        type=int,
+        default=1_000_000,
+        help="Number of training steps the algorithm undergoes"
+    )
+
+    # Parse arguments
+    return parser
+
+
+str_to_alg = {
+    "PPO": PPO,
+    "A2C": A2C,
+    "LAD": LAD,
+}
 
 class TrainingPerformanceCallback(BaseCallback):
-    """
-    Tracks performance on the actual training environment.
 
-    This records the returns obtained by the trajectories used for training;
-    it does NOT run separate evaluation episodes.
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
 
-    Parameters
-    ----------
-    log_freq : int
-        How often, in training timesteps, to record a performance snapshot.
-
-    window_size : int
-        Number of most recent completed episodes used to compute the
-        rolling mean/std.
-
-    verbose : int
-        SB3 callback verbosity.
-    """
-
-    def __init__(
-        self,
-        log_freq: int = 1_000,
-        window_size: int = 100,
-    ):
-        super().__init__()
-
-        self.log_freq = log_freq
-        self.window_size = window_size
-
-        # Raw episode-level data
-        self.episode_returns = []
-        self.episode_lengths = []
-        self.episode_timesteps = []
-
-        # Intermediate performance snapshots
         self.timesteps = []
-        self.mean_rewards = []
-        self.std_rewards = []
-
-        self._recent_returns = deque(maxlen=window_size)
-
-        self._current_returns = None
-        self._current_lengths = None
-
-        self._last_log_timestep = 0
-
-    def _on_training_start(self) -> None:
-        # SB3 always internally uses a VecEnv.
-        n_envs = self.training_env.num_envs
-
-        self._current_returns = np.zeros(n_envs, dtype=np.float64)
-        self._current_lengths = np.zeros(n_envs, dtype=np.int64)
+        self.episode_rewards = []
+        self.episode_lengths = []
+        self.hidden_rewards = []
 
     def _on_step(self) -> bool:
-        """
-        Called after each training environment step.
-        """
 
-        rewards = np.asarray(self.locals["rewards"])
-        dones = np.asarray(self.locals["dones"])
+        for info in self.locals["infos"]:
 
-        # Add this step's reward to each active episode.
-        self._current_returns += rewards
-        self._current_lengths += 1
-
-        # Record episodes that terminated on this step.
-        for env_idx, done in enumerate(dones):
-            if done:
-                episode_return = float(self._current_returns[env_idx])
-                episode_length = int(self._current_lengths[env_idx])
-
-                self.episode_returns.append(episode_return)
-                self.episode_lengths.append(episode_length)
-                self.episode_timesteps.append(self.num_timesteps)
-
-                self._recent_returns.append(episode_return)
-
-                # Reset accumulator for that environment.
-                self._current_returns[env_idx] = 0.0
-                self._current_lengths[env_idx] = 0
-
-        # Save a rolling performance snapshot.
-        if (
-            self.num_timesteps - self._last_log_timestep
-            >= self.log_freq
-        ):
-            self._record_performance()
-            self._last_log_timestep = self.num_timesteps
+            if "episode" in info:
+                # print("-"*80)
+                # print(info)
+                self.timesteps.append(self.num_timesteps)
+                self.episode_rewards.append(info["episode"]["r"])
+                self.episode_lengths.append(info["episode"]["l"])
+                self.hidden_rewards.append(info["episode"]["hidden_reward"])
 
         return True
 
-    def _record_performance(self) -> None:
-        if len(self._recent_returns) == 0:
-            return
+    def plot_training_run(self, plotname: str) -> pd.DataFrame:
+        df = pd.DataFrame({
+            "timesteps": self.timesteps,
+            "reward": self.episode_rewards,
+            "hidden_reward": self.hidden_rewards,
+            "episode_length": self.episode_lengths,
+        })
 
-        recent = np.asarray(self._recent_returns)
+        x = df["timesteps"]
+        y = df["reward"]
 
-        mean_reward = float(np.mean(recent))
-        std_reward = float(np.std(recent))
+        plt.plot(x, y)
+        plt.savefig(plotname)
 
-        self.timesteps.append(self.num_timesteps)
-        self.mean_rewards.append(mean_reward)
-        self.std_rewards.append(std_reward)
+        return df
 
-        # Also make these available to the SB3 logger / TensorBoard.
-        self.logger.record(
-            "train_performance/mean_reward",
-            mean_reward,
-        )
-        self.logger.record(
-            "train_performance/std_reward",
-            std_reward,
-        )
+        
 
 
-
-def train_eval_loop(env_str: str = ENVIRONMENT_SETTINGS[0], algorithm_str: str = "PPO"):
+def train_eval_loop(env_str: str = ENVIRONMENT_SETTINGS[0], algorithm_str: str = "PPO", num_steps: int = 1_000_000):
     # Dynamically initialize the algorithm based off of which algorithm string and environment setting was passed in
     env = gym.make(env_str)
+    # env = make_vec_env(env_str, n_envs=NUM_ENVS)
+    env = Monitor(env, info_keywords=("hidden_reward",))
 
     kwarg_dict = getattr(config, f"{algorithm_str}_KWARGS")
     kwarg_dict["env"] = env
@@ -137,20 +101,21 @@ def train_eval_loop(env_str: str = ENVIRONMENT_SETTINGS[0], algorithm_str: str =
     algorithm = str_to_alg[algorithm_str]
     model = algorithm(**kwarg_dict)
      
-    num_steps = 500_000
-    model_str = f"{algorithm_str}_{env_str}_{num_steps}"
+    model_str = f"{algorithm_str}_{env_str}"
+
+    train_callback = TrainingPerformanceCallback(verbose=True)
 
     callbacks = CallbackList([
-        EntropyAnnealingCallback(initial=0.05, final=0.01, anneal_steps=500_000),
-        CheckpointCallback(save_freq=100_000, save_path="model_weights", name_prefix = model_str),
-        TrainingPerformanceCallback(log_freq=1_000, window_size=1_000)
+        EntropyAnnealingCallback(initial=0.05, final=0.01, anneal_steps=int(num_steps/2)),
+        CheckpointCallback(save_freq=int(num_steps/5), save_path="model_weights", name_prefix = model_str),
+        train_callback,
         ]
     )
 
-
-    # model.load(model_str)
     model.learn(total_timesteps=num_steps, progress_bar=True, callback=callbacks)
-    # model.save(os.pathmodel_str)
+
+    df = train_callback.plot_training_run("test.png")
+    df.to_csv(f"{model_str}.csv")
 
     # Evaluate
     obs = env.reset()
@@ -202,14 +167,10 @@ def eval_model(model_str: str):
 
 
 def main():
-    # env = factory.
-    env = gym.make(ENVIRONMENT_SETTINGS[0])
-    print("Observation spec:", env.observation_space)
-    print("Action spec:", env.action_space)
-    # print(Actions)
-    # model = PPO("MlpPolicy", env, verbose=1, learning_rate=3e-4)
-    # model.learn(10_000)
-    train_eval_loop()
+    parser = create_parser()
+    args = parser.parse_args()
+    for env_str in ENVIRONMENT_SETTINGS[:1]:
+        train_eval_loop(algorithm_str=args.algorithm_str, env_str= env_str, num_steps=args.num_steps)
 
 
 
