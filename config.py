@@ -1,7 +1,7 @@
+import torch
 import torch.nn as nn
 import gym
-from stable_baselines3 import PPO, DQN, A2C
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback, ProgressBarCallback
+from stable_baselines3.common.callbacks import BaseCallback
 
 
 ENVIRONMENT_SETTINGS = [
@@ -12,8 +12,6 @@ ENVIRONMENT_SETTINGS = [
     "DistributionalShift-v0",
     "AbsentSupervisor-v0", 
 ]
-
-NUM_ENVS = 16
 
 
 # ------------------------------------------------------------------
@@ -103,4 +101,58 @@ PPO_KWARGS = {
 #         "share_features_extractor": False,  # separate CNN for actor & critic
 #         "ortho_init": True,
 #     },
+}
+
+LAD_KWARGS = {
+    # --------------------------------------------------------------
+    # Policy / rollout settings — carried over from working A2C
+    # --------------------------------------------------------------
+    "policy": "MlpPolicy",
+    "learning_rate": lr_schedule,   # 5e-4 -> 0 over 900k steps
+    "n_steps": 20,
+    "gamma": 0.99,
+    "gae_lambda": 1.0,
+
+    # --------------------------------------------------------------
+    # LAD-specific settings
+    # --------------------------------------------------------------
+    "batch_size": 100,               # optimize the entire rollout together
+    "n_epochs": 10,                  # stay close to on-policy behavior
+
+    "eta": 1,                    # kappa = 1 / eta = 4
+    "divergence": "js",             # Jensen-Shannon divergence
+    "normalize_advantage": True,    # important because LAD uses exp(A / eta)
+
+    # --------------------------------------------------------------
+    # Actor-critic auxiliary losses
+    # --------------------------------------------------------------
+    "vf_coef": 0.25,                # same critic weight as working A2C
+    "ent_coef": 0,                # preserve exploration behavior initially
+
+    # LAD's exponential objective benefits from much tighter clipping
+    "max_grad_norm": 1.0,
+
+    # No PPO-style KL constraint initially
+    "target_kl": None,
+
+    # Prevent exp(A / eta) / likelihood ratios from overflowing
+    "numerical_clip": 20.0,
+
+    "verbose": 1,
+
+    # --------------------------------------------------------------
+    # Policy architecture / optimizer
+    # --------------------------------------------------------------
+    "policy_kwargs": {
+        "net_arch": [100, 100],
+        "activation_fn": nn.ReLU,
+
+        # LAD does not have A2C's use_rms_prop/rms_prop_eps arguments,
+        # so configure RMSProp directly through ActorCriticPolicy.
+        "optimizer_class": torch.optim.RMSprop,
+        "optimizer_kwargs": {
+            "alpha": 0.99,
+            "eps": 0.1,
+        },
+    },
 }
