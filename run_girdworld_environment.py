@@ -9,6 +9,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import argparse
 
+from stable_baselines3 import PPO, A2C
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback, ProgressBarCallback
@@ -55,10 +56,13 @@ class TrainingPerformanceCallback(BaseCallback):
         self.episode_rewards = []
         self.episode_lengths = []
         self.hidden_rewards = []
+        self.current_ep_hidden_reward = 0
 
     def _on_step(self) -> bool:
 
         for info in self.locals["infos"]:
+            if info["hidden_reward"]:
+                self.current_ep_hidden_reward += info["hidden_reward"]
 
             if "episode" in info:
                 # print("-"*80)
@@ -66,29 +70,22 @@ class TrainingPerformanceCallback(BaseCallback):
                 self.timesteps.append(self.num_timesteps)
                 self.episode_rewards.append(info["episode"]["r"])
                 self.episode_lengths.append(info["episode"]["l"])
-                self.hidden_rewards.append(info["episode"]["hidden_reward"])
+                self.hidden_rewards.append(self.current_ep_hidden_reward)
+                self.current_ep_hidden_reward = 0
 
         return True
 
-    def plot_training_run(self, plotname: str) -> pd.DataFrame:
-        df = pd.DataFrame({
+    def save_training_run(self, plotname: str) -> pd.DataFrame:
+        
+        return pd.DataFrame({
             "timesteps": self.timesteps,
             "reward": self.episode_rewards,
             "hidden_reward": self.hidden_rewards,
             "episode_length": self.episode_lengths,
         })
-
-        x = df["timesteps"]
-        y = df["reward"]
-
-        plt.plot(x, y)
-        plt.savefig(plotname)
-
-        return df
-
         
 
-
+        
 def train_eval_loop(env_str: str = ENVIRONMENT_SETTINGS[0], algorithm_str: str = "PPO", num_steps: int = 1_000_000):
     # Dynamically initialize the algorithm based off of which algorithm string and environment setting was passed in
     env = gym.make(env_str)
@@ -106,7 +103,7 @@ def train_eval_loop(env_str: str = ENVIRONMENT_SETTINGS[0], algorithm_str: str =
     train_callback = TrainingPerformanceCallback(verbose=True)
 
     callbacks = CallbackList([
-        EntropyAnnealingCallback(initial=0.05, final=0.01, anneal_steps=int(num_steps/2)),
+        EntropyAnnealingCallback(initial=0.1, final=0.01, anneal_steps=int(num_steps/2)),
         CheckpointCallback(save_freq=int(num_steps/5), save_path="model_weights", name_prefix = model_str),
         train_callback,
         ]
@@ -114,8 +111,8 @@ def train_eval_loop(env_str: str = ENVIRONMENT_SETTINGS[0], algorithm_str: str =
 
     model.learn(total_timesteps=num_steps, progress_bar=True, callback=callbacks)
 
-    df = train_callback.plot_training_run("test.png")
-    df.to_csv(f"{model_str}.csv")
+    df = train_callback.save_training_run(f"training_run_visualizations/{model_str}.png")
+    df.to_csv(f"training_runs/{model_str}.csv")
 
     # Evaluate
     obs = env.reset()
@@ -169,7 +166,7 @@ def eval_model(model_str: str):
 def main():
     parser = create_parser()
     args = parser.parse_args()
-    for env_str in ENVIRONMENT_SETTINGS[:1]:
+    for env_str in ENVIRONMENT_SETTINGS[4:]:
         train_eval_loop(algorithm_str=args.algorithm_str, env_str= env_str, num_steps=args.num_steps)
 
 
