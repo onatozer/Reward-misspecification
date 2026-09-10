@@ -108,7 +108,8 @@ LAD_KWARGS = {
     # Policy / rollout settings — carried over from working A2C
     # --------------------------------------------------------------
     "policy": "MlpPolicy",
-    "learning_rate": lr_schedule,   
+    # "learning_rate": lr_schedule,   
+    "learning_rate": 1e-4,   
     "n_steps": 160,
     "gamma": 0.99,
     "gae_lambda": 1.0,
@@ -119,14 +120,14 @@ LAD_KWARGS = {
     "batch_size": 20,               # optimize the entire rollout together
     "n_epochs": 8,                  # stay close to on-policy behavior
 
-    "eta": 4.0,                    # kappa = 1 / eta = 4
+    "eta": .25,                    # kappa = 1 / eta = 4
     "divergence": "js",             # Jensen-Shannon divergence
     "normalize_advantage": True,    # important because LAD uses exp(A / eta)
 
     # --------------------------------------------------------------
     # Actor-critic auxiliary losses
     # --------------------------------------------------------------
-    "vf_coef": 0.25,                # same critic weight as working A2C
+    "vf_coef": 0.1,                # same critic weight as working A2C
     "ent_coef": 0.00,                # preserve exploration behavior initially
 
     # LAD's exponential objective benefits from much tighter clipping
@@ -148,4 +149,50 @@ LAD_KWARGS = {
             "eps": 0.1,
         },
     },
+}
+
+IBNN_A2C_KWARGS = {
+    # ------------------------------------------------------------
+    # Standard A2C
+    # ------------------------------------------------------------
+    "policy": "MlpPolicy",
+    "learning_rate": lr_schedule,
+    "n_steps": 20,
+    "gamma": 0.99,
+    "gae_lambda": 1.0,
+    "ent_coef": 0.1,
+    "max_grad_norm": 40.0,
+    "rms_prop_eps": 0.1,
+    "use_rms_prop": True,
+    "normalize_advantage": False,
+
+    # ------------------------------------------------------------
+    # Infinite-width Bayesian critic
+    # ------------------------------------------------------------
+    "ibnn_depth": 2,              # analogous to a 2-hidden-layer [100, 100] MLP
+    "ibnn_weight_var": 10.0,
+    "ibnn_bias_var": 5.0,
+    "ibnn_noise_var": 1e-2,
+
+    # Limit exact GP training set size
+    "ibnn_max_points": 512,
+
+    # Start with fixed IBNN kernel hyperparameters
+    "ibnn_optimize_hypers": False,
+
+    # ------------------------------------------------------------
+    # Uncertainty estimation
+    # ------------------------------------------------------------
+    "n_advantage_samples": 32,
+
+    # +/- 1 std -> width = 2 * std
+    "confidence_std_mult": 1.0,
+
+    "uncertainty_eps": 1e-3,
+    "max_scaled_advantage": 10.0,
+
+    # ------------------------------------------------------------
+    # SB3
+    # ------------------------------------------------------------
+    "verbose": 1,
 }

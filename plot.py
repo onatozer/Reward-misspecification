@@ -96,5 +96,5 @@ def plot_gridworld_run(grid_world_str: str, model_strs: list[str]):
 
 if  __name__ == "__main__":
     models = ["A2C", "LAD"]
-    for env_str in ENVIRONMENT_SETTINGS[2:3]:
+    for env_str in ENVIRONMENT_SETTINGS[3:4]:
         plot_gridworld_run(env_str, models)
